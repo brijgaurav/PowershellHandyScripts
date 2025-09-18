@@ -1,1 +1,58 @@
+//Enable RDP session on client systems
+Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0
+Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
 
+//Invoke-command Series slower than parallel
+$timer1 = Get-Date
+$ips = @("192.168.138.30","192.168.138.37", "192.168.138.35")
+$User = "domain\user"
+$PWord = "password" | ConvertTo-SecureString -AsPlainText -Force
+$Credential = New-Object -TypeName System.Management.Automation.PSCredential -ArgumentList $User, $PWord
+foreach ($ip in $ips) {
+    $Session = New-PSSession -ComputerName $ip -Credential $Credential
+    Invoke-Command -Session $Session -ScriptBlock{Get-ComputerInfo; ipconfig.exe}
+}
+Write-Host " "
+$timer2 = Get-Date
+($timer2-$timer1).totalSeconds
+
+
+//Invoke-command Parallel
+$timer1 = Get-Date
+$ComputerName = @("192.168.138.30", "192.168.138.37", "192.168.138.35")
+$User = "domain\user"
+$PWord = "password" | ConvertTo-SecureString -AsPlainText -Force
+$Credential = New-Object -TypeName System.Management.Automation.PSCredential -ArgumentList $User, $PWord
+Invoke-Command -ComputerName $ComputerName -Credential $Credential -ScriptBlock{Get-ComputerInfo; ipconfig.exe}
+$timer2 = Get-Date
+($timer2-$timer1).totalSeconds
+
+//Get-service detail if its installed on range of windows hosts. Here is example of Elastic-agent service.
+$computers = Get-Content -Path ".\windows.txt" 
+$userCreds = Get-Credential -Message "Enter Credentials here: "
+Set-Item WSMan:\localhost\Client\TrustedHosts -Value "*" -Force
+foreach ($computer in $computers) {
+    try {
+        $session = New-PSSession -ComputerName $computer -Credential $userCreds
+    }
+    catch {
+        Write-Host "[x] Unable to create session to $computer `n $_ `n" -ForegroundColor Red
+        continue
+    }
+    Invoke-Command -Session $session -ScriptBlock {
+        param($computer)
+        if (Get-Service -Name "Elastic Agent") {
+            Write-Host "`n[!] Elastic State on $computer " -ForegroundColor Yellow
+            Get-Service -Name "Elastic Agent"
+        } 
+        else {
+            Write-Host "`n[x] No service named Elastic Agent running on $computer" -ForegroundColor Red
+        }
+    } -ArgumentList $computer
+    if ($session) {
+        Remove-PSSession $session
+    }
+}
+Clear-Item WSMan:\localhost\Client\TrustedHosts -Force
+
+//
